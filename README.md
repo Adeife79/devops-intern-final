@@ -1,6 +1,6 @@
 # DevOps Intern Final Assessment
 
-**Author:** Manus AI  
+**Author:** Ganiyu Arigbabu  
 **Date:** August 6, 2026  
 **GitHub Repository:** `devops-intern-final`
 
