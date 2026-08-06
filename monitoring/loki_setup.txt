@@ -1,0 +1,40 @@
+Grafana Loki Monitoring Setup & Documentation
+===============================================
+
+1. How Loki was Started
+-----------------------
+Grafana Loki was deployed locally using Docker to aggregate logs from containerized workloads and Nomad jobs. The official Loki Docker image was started with a standard local configuration file (`loki-config.yaml`) running on port 3100.
+
+Command used to start Loki:
+```bash
+docker run -d --name loki -p 3100:3100 grafana/loki:latest -config.file=/etc/loki/local-config.yaml
+```
+
+2. Log Forwarding Configuration
+-------------------------------
+To forward container logs (such as those from Nomad tasks or raw Docker containers) to Loki, the Docker logging driver (`loki`) was configured in the container runtime or Nomad job spec, or via Promtail as a log agent.
+Example Docker run with Loki logging driver:
+```bash
+docker run --d --name hello-app \
+  --log-driver=loki \
+  --log-opt loki-url="http://localhost:3100/loki/api/v1/push" \
+  devops-hello:latest
+```
+
+3. Commands Used to View Logs
+------------------------------
+Logs collected by Loki can be queried using LogQL via the Grafana UI (connected to Loki data source at `http://localhost:3100`) or directly via the Loki HTTP API / LogCLI tool.
+
+To query logs using LogCLI:
+```bash
+# Connect LogCLI to local Loki instance
+export LOKI_ADDR=http://localhost:3100
+
+# Query logs for the hello application
+logcli query '{job="docker"}' --since=1h
+```
+
+To verify Loki health:
+```bash
+curl http://localhost:3100/ready
+```
