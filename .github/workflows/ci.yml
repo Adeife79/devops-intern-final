@@ -2,22 +2,147 @@ name: CI
 
 on:
   push:
-    branches: [ "master", "main" ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ "master", "main" ]
+    branches: [ "main" ]
 
 jobs:
-  build:
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Lint with shellcheck
+        uses: ludeeus/action-shellcheck@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          shellcheck_version: v0.8.0
+          script: |
+            scripts/sysinfo.sh
+            scripts/healthcheck.sh
+        # script: |
+        #   working_dir: app
+
+      - name: Lint Dockerfilewith hadolint
+        uses: hadolint/hadolint-action@v2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          dockerfile: app/Dockerfile
+
+
+  build:
+    name: Build
+    needs: lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
       
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.11"
-        
-    - name: Run hello.py
-      run: |
-        python hello.py
+      - name: Build Docker Image
+        working-directory: app
+        # with:
+        #   BUILD_SHA: ${{ github.sha }}
+        run: |
+          docker build --build-arg BUILD_SHA="${{ github.sha }}" -t nginx-app:${{ github.sha }}
+
+      - name: Save Docker image
+        run: |
+          docker save nginx-app:${{ github.sha }} -o nginx-app.tar
+
+      - name: Upload Docker image
+        uses: actions/upload-artifact@v4
+        with:
+          name: nginx-image
+          path: nginx-app.tar
+          retention-days: 1
+      
+
+  test:
+    name: Test
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Docker image
+        uses: actions/download-artifact@v4
+        with:
+          name: nginx-image
+
+      - name: Load Docker image
+        run: docker load -i nginx-app.tar
+
+      - name: Run Container
+        # working-directory: app
+        run: |
+          docker run -d -p 8089:8080 --name nginx-app nginx-app:${{ github.sha }}
+
+      - name: Wait for Container to start
+        run: sleep 5
+
+      - name: Test Healthcheck
+        working-directory: scripts
+        run: |
+          chmod +x healthcheck.sh
+          ./healthcheck.sh
+
+
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    needs: test
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Download Docker image
+        uses: actions/download-artifact@v4
+        with:
+          name: nginx-image
+
+      - name: Load Docker image
+        run: docker load -i nginx-app.tar
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag and publish Docker image
+        env:
+          REPOSITORY: ${{ github.repository }}
+          SHA: ${{ github.sha  }}
+        run: |
+          IMAGE="ghcr.io/${REPOSITORY,,}"
+
+          docker tag "nginx-app:$SHA" "$IMAGE:$SHA"
+          docker tag "nginx-app:$SHA" "$IMAGE:latest"
+
+          docker push "$IMAGE:$SHA"
+          docker push "$IMAGE:latest"
+
+      # - name: Push Image to GitHub Container Registry
+      #   working-directory: app
+      #   run: |
+      #     echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      #     docker tag ${{ github.sha }} ghcr.io/${{ github.repository_owner }}/nginx-app:${{ github.sha }}
+      #     docker push ghcr.io/${{ github.repository_owner }}/nginx-app:${{ github.sha }}
+
+  
+
+
